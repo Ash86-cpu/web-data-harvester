@@ -10,10 +10,31 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.10", "3.12"]
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: records
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      MYSQL_URL: mysql://root:root@127.0.0.1:3306/records
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements-dev.txt
-      - run: python -m pytest -v
+      - name: Unit and end-to-end tests (SQLite and MySQL)
+        run: python -m pytest -v
+      - name: Live run against the records site, stored in MySQL
+        run: |
+          python -m records_site &
+          sleep 3
+          python -m harvester run samples/parcels.csv --db "$MYSQL_URL"
+          python -m harvester run samples/accounts.txt --by account --db "$MYSQL_URL"
+          python -m harvester validate --db "$MYSQL_URL"
