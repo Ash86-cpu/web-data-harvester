@@ -1,3 +1,3 @@
-"""web-data-harvester: collect product data from a website and validate it."""
+"""web-data-harvester: look up records on a website and store exact matches."""
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
