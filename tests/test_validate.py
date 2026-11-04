@@ -1,58 +1,48 @@
-from harvester.models import Book
+from harvester.models import Record
 from harvester.validate import validate
 
 
-def book(**kw):
-    base = dict(upc="u1", title="T", price="10.00", stock="3", rating="4",
-                category="C", url="http://x")
+def rec(**kw):
+    base = dict(parcel="P-1000", account="A-20037", owner="Alex Archer",
+                address="1 Oak Lane", assessed_value="250000", tax_status="Paid",
+                last_updated="2026-03-01", source_url="http://x")
     base.update(kw)
-    return Book(**base)
+    return Record(**base)
 
 
 def kinds(problems):
     return [(p.kind, p.record) for p in problems]
 
 
-def test_clean_records_have_no_problems():
-    assert validate([book(upc="a"), book(upc="b")]) == []
+def test_clean_records():
+    assert validate([rec(), rec(parcel="P-1001", account="A-20074")]) == []
 
 
-def test_missing_required_field():
-    problems = validate([book(upc="")])
-    assert kinds(problems) == [("MISSING", 1)]
-    assert "no upc" in problems[0].message
+def test_missing_field():
+    p = validate([rec(owner="")])
+    assert kinds(p) == [("MISSING", 1)] and "no owner" in p[0].message
 
 
-def test_price_not_a_number():
-    problems = validate([book(price="N/A")])
-    assert kinds(problems) == [("INVALID", 1)]
-    assert "not a number" in problems[0].message
+def test_bad_number_formats():
+    p = validate([rec(parcel="1000", account="ACC-1")])
+    assert len(p) == 2 and all(x.kind == "INVALID" for x in p)
 
 
-def test_negative_price():
-    assert "negative" in validate([book(price="-1")])[0].message
+def test_assessed_value_must_be_positive_number():
+    assert "not a number" in validate([rec(assessed_value="N/A")])[0].message
+    assert "not positive" in validate([rec(assessed_value="0")])[0].message
 
 
-def test_empty_price_reported_once_as_missing():
-    assert kinds(validate([book(price="")])) == [("MISSING", 1)]
+def test_unknown_tax_status():
+    assert "tax status" in validate([rec(tax_status="Overdue")])[0].message
 
 
-def test_rating_out_of_range():
-    for bad in ("0", "6", "", "three"):
-        assert kinds(validate([book(rating=bad)])) == [("INVALID", 1)]
+def test_dates():
+    assert "not a YYYY-MM-DD" in validate([rec(last_updated="03/01/2026")])[0].message
+    assert "in the future" in validate([rec(last_updated="2999-01-01")])[0].message
 
 
-def test_stock_must_be_whole_and_not_negative():
-    for bad in ("-2", "1.5", "", "lots"):
-        assert kinds(validate([book(stock=bad)])) == [("INVALID", 1)]
-
-
-def test_duplicate_upc_points_to_first_record():
-    problems = validate([book(upc="a"), book(upc="b"), book(upc="a")])
-    assert kinds(problems) == [("DUPLICATE", 3)]
-    assert "record 1" in problems[0].message
-
-
-def test_problems_sorted_by_record():
-    problems = validate([book(upc="a"), book(price="x"), book(upc="a", rating="9")])
-    assert [p.record for p in problems] == sorted(p.record for p in problems)
+def test_duplicates_point_to_first_record():
+    p = validate([rec(), rec(account="A-20074"), rec(parcel="P-1001")])
+    assert kinds(p) == [("DUPLICATE", 2), ("DUPLICATE", 3)]
+    assert "record 1" in p[0].message

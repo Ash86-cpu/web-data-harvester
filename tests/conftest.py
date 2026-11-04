@@ -1,16 +1,13 @@
-from pathlib import Path
+import os
+from urllib.parse import urlsplit
 
 import pytest
 import requests
 
 from harvester.fetch import Fetcher
+from records_site.app import create_app
 
-FIXTURES = Path(__file__).parent / "fixtures"
-BASE = "https://books.toscrape.com/catalogue/"
-
-
-def read(name):
-    return (FIXTURES / name).read_text(encoding="utf-8")
+SITE = "http://records.test"
 
 
 class FakeResponse:
@@ -27,12 +24,13 @@ class FakeResponse:
 
 
 class FakeSession:
-    """Serves saved pages by URL. `script` maps a URL to a list of results
-    returned in order (an int status, an exception, or page text)."""
+    """`script` maps a URL to results returned in order (status int,
+    exception, or page text); anything else falls through to `app`."""
 
-    def __init__(self, pages=None, script=None):
+    def __init__(self, pages=None, script=None, app=None):
         self.pages = pages or {}
         self.script = {k: list(v) for k, v in (script or {}).items()}
+        self.client = app.test_client() if app else None
         self.headers = {}
         self.calls = []
 
@@ -42,27 +40,14 @@ class FakeSession:
             item = self.script[url].pop(0)
             if isinstance(item, Exception):
                 raise item
-            if isinstance(item, int):
-                return FakeResponse(item)
-            return FakeResponse(200, item)
+            return FakeResponse(item) if isinstance(item, int) else FakeResponse(200, item)
         if url in self.pages:
             return FakeResponse(200, self.pages[url])
+        if self.client:
+            parts = urlsplit(url)
+            r = self.client.get(parts.path + ("?" + parts.query if parts.query else ""))
+            return FakeResponse(r.status_code, r.get_data(as_text=True))
         return FakeResponse(404)
-
-
-@pytest.fixture
-def site():
-    """A two-page fake catalogue where every book link serves the saved book page."""
-    from harvester.parse import parse_list
-
-    p1, p2 = read("list_page_1.html"), read("list_page_50.html")
-    url1, url2 = BASE + "page-1.html", BASE + "page-2.html"
-    pages = {url1: p1, url2: p2}
-    book = read("book.html")
-    for html, url in ((p1, url1), (p2, url2)):
-        for link in parse_list(html, url)[0]:
-            pages[link] = book
-    return pages
 
 
 @pytest.fixture
@@ -73,3 +58,33 @@ def fetcher_for():
         f.sleeps = sleeps
         return f
     return make
+
+
+@pytest.fixture
+def site_fetcher():
+    """A Fetcher wired to the fake records site, running in-process."""
+    def make(records=None, script=None):
+        return Fetcher(session=FakeSession(app=create_app(records), script=script),
+                       sleep=lambda s: None)
+    return make
+
+
+DB_URLS = ["sqlite"]
+if os.environ.get("MYSQL_URL"):
+    DB_URLS.append("mysql")
+
+
+@pytest.fixture(params=DB_URLS)
+def db_url(request, tmp_path):
+    """Every storage test runs on SQLite, and on MySQL too when MYSQL_URL is set (CI)."""
+    if request.param == "sqlite":
+        return f"sqlite:///{(tmp_path / 'r.db').as_posix()}"
+    import pymysql
+    url = os.environ["MYSQL_URL"]
+    from harvester.store import Database
+    db = Database(url)
+    db.execute("DROP TABLE IF EXISTS property_records")
+    db.execute("DROP TABLE IF EXISTS lookup_log")
+    db.con.commit()
+    db.close()
+    return url
