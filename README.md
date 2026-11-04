@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/Ash86-cpu/web-data-harvester/actions/workflows/tests.yml/badge.svg)](https://github.com/Ash86-cpu/web-data-harvester/actions/workflows/tests.yml)
 
-![Example run](docs/demo.png)
+![Example run](docs/demo.gif)
 
 A Python data-harvesting bot that takes a list of parcel or account numbers,
 looks each one up on a records website, loops through the search results to
